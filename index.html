@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>EAN Preis Rechner</title>
+<style>
+body{font-family:Arial,sans-serif;margin:24px;max-width:1000px}
+input,select,button{padding:8px;margin:4px 0}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th,td{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+</style>
+</head>
+<body>
+
+<h2>EAN Preis Rechner mit Speicherung</h2>
+
+<label>EAN</label><br>
+<input id="ean"><br>
+
+<label>Preis</label><br>
+<input id="price"><br>
+
+<label>Abzug in Prozent</label><br>
+<select id="percent"></select><br>
+
+<label>Preis nach Abzug</label><br>
+<input id="result" disabled><br>
+
+<button onclick="addRow()">Hinzufügen</button>
+<button onclick="exportCSV()">CSV exportieren</button>
+<button onclick="clearAll()">Liste leeren</button>
+
+<table>
+<thead>
+<tr>
+<th>EAN</th>
+<th>Preis</th>
+<th>Prozent</th>
+<th>Campaign Preis</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+
+<script>
+const STORAGE_KEY="ean_campaign_data_v1";
+
+const eanEl=document.getElementById("ean");
+const priceEl=document.getElementById("price");
+const percentEl=document.getElementById("percent");
+const resultEl=document.getElementById("result");
+const tbody=document.getElementById("tbody");
+
+let rows=[];
+
+function saveData(){localStorage.setItem(STORAGE_KEY,JSON.stringify(rows));}
+function loadData(){const d=localStorage.getItem(STORAGE_KEY);if(d){rows=JSON.parse(d);}}
+
+function initPercent(select,selected){
+  select.innerHTML="";
+  for(let i=2;i<=50;i++){
+    const o=document.createElement("option");
+    o.value=i;o.textContent=i+"%";
+    if(i===selected)o.selected=true;
+    select.appendChild(o);
+  }
+}
+
+function parsePrice(v){if(!v)return NaN;return Number(String(v).replace(",", "."));}
+function formatPrice(v){return Number.isFinite(v)?v.toFixed(2).replace(".",","):"";}
+
+function roundToX9(v){
+  if(!Number.isFinite(v))return NaN;
+  let euros=Math.floor(v);
+  let cents=Math.ceil(((v-euros)*100)-1e-9);
+  let tens=Math.ceil(cents/10);
+  cents=tens*10+9;
+  if(cents>=100){euros+=1;cents=9;}
+  return euros+cents/100;
+}
+
+function recalc(r){
+  if(!Number.isFinite(r.price)||!Number.isFinite(r.percent)){r.campaign=NaN;return;}
+  const discounted=r.price*(1-r.percent/100);
+  r.campaign=roundToX9(discounted);
+}
+
+function updatePreview(){
+  const p=parsePrice(priceEl.value);
+  const pct=Number(percentEl.value);
+  if(!Number.isFinite(p)){resultEl.value="";return;}
+  resultEl.value=formatPrice(roundToX9(p*(1-pct/100)));
+}
+
+function render(){
+  tbody.innerHTML="";
+  rows.forEach((r,i)=>{
+    recalc(r);
+
+    const tr=document.createElement("tr");
+
+    const eanTd=document.createElement("td");
+    const eanIn=document.createElement("input");
+    eanIn.value=r.ean||"";
+    eanIn.oninput=()=>{r.ean=(eanIn.value||"").trim();saveData();};
+    eanTd.appendChild(eanIn);
+
+    const priceTd=document.createElement("td");
+    const priceIn=document.createElement("input");
+    priceIn.value=formatPrice(r.price);
+    priceIn.onblur=()=>{r.price=parsePrice(priceIn.value);render();saveData();};
+    priceTd.appendChild(priceIn);
+
+    const pctTd=document.createElement("td");
+    const pctSel=document.createElement("select");
+    initPercent(pctSel, Number(r.percent)||10);
+    pctSel.onchange=()=>{r.percent=Number(pctSel.value);render();saveData();};
+    pctTd.appendChild(pctSel);
+
+    const campTd=document.createElement("td");
+    campTd.textContent=formatPrice(r.campaign);
+
+    const delTd=document.createElement("td");
+    const btn=document.createElement("button");
+    btn.textContent="Löschen";
+    btn.onclick=()=>{rows.splice(i,1);render();saveData();};
+    delTd.appendChild(btn);
+
+    tr.appendChild(eanTd);
+    tr.appendChild(priceTd);
+    tr.appendChild(pctTd);
+    tr.appendChild(campTd);
+    tr.appendChild(delTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function addRow(){
+  const e=(eanEl.value||"").trim();
+  const p=parsePrice(priceEl.value);
+  const pct=Number(percentEl.value);
+  if(!e||!Number.isFinite(p))return alert("Daten prüfen");
+  rows.push({ean:e,price:p,percent:pct,campaign:NaN});
+  render();
+  saveData();
+  eanEl.value="";
+  priceEl.value="";
+  updatePreview();
+}
+
+function exportCSV(){
+  if(!rows.length)return alert("Liste leer");
+  let lines=["ean;campaign_price"];
+  rows.forEach(r=>{
+    recalc(r);
+    if(!r.ean||!Number.isFinite(r.campaign))return;
+    lines.push(r.ean+";"+formatPrice(r.campaign));
+  });
+  const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download="campaign_prices.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function clearAll(){
+  if(!confirm("Wirklich alles löschen?"))return;
+  rows=[];
+  saveData();
+  render();
+}
+
+initPercent(percentEl,10);
+priceEl.oninput=updatePreview;
+percentEl.onchange=updatePreview;
+
+loadData();
+render();
+updatePreview();
+</script>
+
+</body>
+</html>
