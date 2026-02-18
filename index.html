@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EAN Preis Rechner</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 24px; max-width: 980px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 180px; }
+    label { font-size: 12px; opacity: 0.8; }
+    input, select, button { padding: 10px 12px; font-size: 14px; }
+    input, select { border: 1px solid #ccc; border-radius: 8px; }
+    input[disabled] { background: #f5f5f5; }
+    button { border: 0; border-radius: 10px; cursor: pointer; }
+    button.primary { background: #111; color: #fff; }
+    button.ghost { background: #eee; }
+    button.danger { background: #b00020; color: #fff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { padding: 10px; border-bottom: 1px solid #e6e6e6; text-align: left; vertical-align: middle; }
+    th { font-size: 12px; opacity: 0.8; }
+    .cell-input { width: 100%; box-sizing: border-box; }
+    .mono { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <h1>EAN Preis Rechner – Rundung auf ,x9</h1>
+
+  <div class="row">
+    <div class="field">
+      <label for="ean">EAN</label>
+      <input id="ean" inputmode="numeric" />
+    </div>
+
+    <div class="field">
+      <label for="price">Preis</label>
+      <input id="price" inputmode="decimal" />
+    </div>
+
+    <div class="field">
+      <label for="percent">Abzug in Prozent</label>
+      <select id="percent"></select>
+    </div>
+
+    <div class="field">
+      <label for="result">Preis nach Abzug</label>
+      <input id="result" class="mono" disabled />
+    </div>
+
+    <div class="field">
+      <button class="primary" id="add">Hinzufügen</button>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <button class="ghost" id="export">CSV exportieren</button>
+    <button class="danger" id="clear">Liste leeren</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>EAN</th>
+        <th>Preis</th>
+        <th>Prozent</th>
+        <th>Campaign Preis</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script>
+const eanEl = document.getElementById("ean");
+const priceEl = document.getElementById("price");
+const percentEl = document.getElementById("percent");
+const resultEl = document.getElementById("result");
+const tbody = document.getElementById("tbody");
+
+let rows = [];
+
+function initPercent(select, selected) {
+  select.innerHTML = "";
+  for (let i = 2; i <= 50; i++) {
+    const o = document.createElement("option");
+    o.value = i;
+    o.textContent = i + "%";
+    if (i === selected) o.selected = true;
+    select.appendChild(o);
+  }
+}
+
+function parsePrice(v) {
+  if (!v) return NaN;
+  return Number(v.replace(",", "."));
+}
+
+function formatPrice(v) {
+  return Number.isFinite(v) ? v.toFixed(2).replace(".", ",") : "";
+}
+
+function roundToX9(v) {
+  if (!Number.isFinite(v)) return NaN;
+  let euros = Math.floor(v);
+  let cents = Math.ceil(((v - euros) * 100) - 1e-9);
+  let tens = Math.ceil(cents / 10);
+  cents = tens * 10 + 9;
+  if (cents >= 100) {
+    euros += 1;
+    cents = 9;
+  }
+  return euros + cents / 100;
+}
+
+function recalc(r) {
+  if (!Number.isFinite(r.price) || !Number.isFinite(r.percent)) {
+    r.campaign = NaN;
+    return;
+  }
+  const discounted = r.price * (1 - r.percent / 100);
+  r.campaign = roundToX9(discounted);
+}
+
+function updatePreview() {
+  const p = parsePrice(priceEl.value);
+  const pct = Number(percentEl.value);
+  if (!Number.isFinite(p)) { resultEl.value = ""; return; }
+  resultEl.value = formatPrice(roundToX9(p * (1 - pct / 100)));
+}
+
+function render() {
+  tbody.innerHTML = "";
+  rows.forEach((r, i) => {
+    recalc(r);
+
+    const tr = document.createElement("tr");
+
+    const eanTd = document.createElement("td");
+    const eanIn = document.createElement("input");
+    eanIn.className = "cell-input";
+    eanIn.value = r.ean;
+    eanIn.oninput = () => r.ean = eanIn.value.trim();
+    eanTd.appendChild(eanIn);
+
+    const priceTd = document.createElement("td");
+    const priceIn = document.createElement("input");
+    priceIn.className = "cell-input mono";
+    priceIn.value = formatPrice(r.price);
+    priceIn.onblur = () => {
+      r.price = parsePrice(priceIn.value);
+      render();
+    };
+    priceTd.appendChild(priceIn);
+
+    const pctTd = document.createElement("td");
+    const pctSel = document.createElement("select");
+    initPercent(pctSel, r.percent);
+    pctSel.onchange = () => {
+      r.percent = Number(pctSel.value);
+      render();
+    };
+    pctTd.appendChild(pctSel);
+
+    const campTd = document.createElement("td");
+    campTd.className = "mono";
+    campTd.textContent = formatPrice(r.campaign);
+
+    const delTd = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.textContent = "Löschen";
+    btn.onclick = () => { rows.splice(i,1); render(); };
+    delTd.appendChild(btn);
+
+    tr.appendChild(eanTd);
+    tr.appendChild(priceTd);
+    tr.appendChild(pctTd);
+    tr.appendChild(campTd);
+    tr.appendChild(delTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function addRow() {
+  const e = eanEl.value.trim();
+  const p = parsePrice(priceEl.value);
+  const pct = Number(percentEl.value);
+  if (!e || !Number.isFinite(p)) return alert("Daten prüfen");
+  rows.push({ ean: e, price: p, percent: pct, campaign: NaN });
+  render();
+  eanEl.value = "";
+  priceEl.value = "";
+  updatePreview();
+}
+
+function exportCSV() {
+  if (!rows.length) return alert("Liste leer");
+
+  let lines = [];
+  lines.push("ean;campaign_price");
+
+  rows.forEach(r => {
+    recalc(r);
+    if (!r.ean || !Number.isFinite(r.campaign)) return;
+    lines.push(r.ean + ";" + formatPrice(r.campaign));
+  });
+
+  const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "campaign_prices.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function clearAll() {
+  if (!confirm("Wirklich alles löschen?")) return;
+  rows = [];
+  render();
+}
+
+initPercent(percentEl, 10);
+priceEl.oninput = updatePreview;
+percentEl.onchange = updatePreview;
+
+document.getElementById("add").onclick = addRow;
+document.getElementById("export").onclick = exportCSV;
+document.getElementById("clear").onclick = clearAll;
+
+updatePreview();
+</script>
+</body>
+</html>
